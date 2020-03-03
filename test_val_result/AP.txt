@@ -1,0 +1,7 @@
+nine  :  1.0
+ten  :  1.0
+jack  :  1.0
+queen  :  1.0
+king  :  1.0
+ace  :  1.0
+Mean Average Precision (mAP):  1.0
