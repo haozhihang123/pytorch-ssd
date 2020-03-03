@@ -1,5 +1,5 @@
 # pytorch-ssd
-# 上传缘由：
+上传缘由：
 源程序来自于：https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection。
 但是原作者的环境是： `PyTorch 0.4` in `Python 3.6`。在用我的环境运行代码时发生一系列问题，最终费了不少力气解决。
 并对原代码做了一些扩充：打印log并生成图像，批量检测数据，目前只是目标检测小白，以此记录自己的学习生涯并备份程序。
