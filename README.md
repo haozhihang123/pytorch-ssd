@@ -14,4 +14,23 @@
 detect.py是用来测试图片并生成相应的带框图片：待测试图片放在test_data文件夹中，输出在test_val_result。
 eval.py 是计算MAP并将结果保存在test_val_result．
 
-３．具体程序内容看原作者README.md
+３．可视化
+增加四项可视化内容：
+（１）可视化特征图并保存
+定义：utils.py→show_feature_map
+引用：model.py→376
+状态：一般训练时处于注释状态，当需要可视化特征图时打开，特征图全部保存后会有中断
+（２）可视化样本训练时真值框，初始框（与真值框IOU最大的一个），预测框并保存
+定义：utils.py→show_groundtruth_priorbox_predictbox
+引用：model.py→604
+状态：一般训练时处于注释状态，当需要可视化时时打开，全部保存后会有中断
+（３）可视化用于训练的样本并保存
+定义：utils.py→show_train_pic
+引用：train.py→128
+状态：一般训练时处于注释状态，当需要可视化时时打开，全部保存后会有中断
+（4）可视化数据增强各个阶段的图片并保存
+定义：utils.py→show_transform_pic
+引用：tuils.py→671
+状态：一般训练时处于注释状态，当需要可视化时时打开，全部保存后会没有中断，需要在train.py中的126行加入中断，或者手动中断
+
+４．具体程序内容看原作者README.md
