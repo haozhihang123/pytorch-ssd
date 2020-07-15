@@ -4,10 +4,14 @@ import torch.nn.functional as F
 from math import sqrt
 from itertools import product as product
 import torchvision
-
+from ipdb import set_trace
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
+import cv2
+import numpy as np
+import os
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFont
 class VGGBase(nn.Module):
     """
     VGG base convolutions to produce lower-level feature maps.
@@ -44,6 +48,8 @@ class VGGBase(nn.Module):
         self.conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)  # atrous convolution
 
         self.conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
+
+
 
         # Load pretrained layers
         self.load_pretrained_layers()
@@ -95,6 +101,7 @@ class VGGBase(nn.Module):
         Therefore, we convert fc6 and fc7 into convolutional layers, and subsample by decimation. See 'decimate' in utils.py.
         """
         # Current state of base
+
         state_dict = self.state_dict()
         param_names = list(state_dict.keys())
 
@@ -155,6 +162,7 @@ class AuxiliaryConvolutions(nn.Module):
         """
         Initialize convolution parameters.
         """
+
         for c in self.children():
             if isinstance(c, nn.Conv2d):
                 nn.init.xavier_uniform_(c.weight)
@@ -255,7 +263,6 @@ class PredictionConvolutions(nn.Module):
         :return: 8732 locations and class scores (i.e. w.r.t each prior box) for each image
         """
         batch_size = conv4_3_feats.size(0)
-
         # Predict localization boxes' bounds (as offsets w.r.t prior-boxes)
         l_conv4_3 = self.loc_conv4_3(conv4_3_feats)  # (N, 16, 38, 38)
         l_conv4_3 = l_conv4_3.permute(0, 2, 3,
@@ -351,13 +358,13 @@ class SSD300(nn.Module):
         """
         # Run VGG base network convolutions (lower level feature map generators)
         conv4_3_feats, conv7_feats = self.base(image)  # (N, 512, 38, 38), (N, 1024, 19, 19)
-
+        
         # Rescale conv4_3 after L2 norm
         norm = conv4_3_feats.pow(2).sum(dim=1, keepdim=True).sqrt()  # (N, 1, 38, 38)
         conv4_3_feats = conv4_3_feats / norm  # (N, 512, 38, 38)
         conv4_3_feats = conv4_3_feats * self.rescale_factors  # (N, 512, 38, 38)
         # (PyTorch autobroadcasts singleton dimensions during arithmetic)
-
+        # set_trace()
         # Run auxiliary convolutions (higher level feature map generators)
         conv8_2_feats, conv9_2_feats, conv10_2_feats, conv11_2_feats = \
             self.aux_convs(conv7_feats)  # (N, 512, 10, 10),  (N, 256, 5, 5), (N, 256, 3, 3), (N, 256, 1, 1)
@@ -365,6 +372,8 @@ class SSD300(nn.Module):
         # Run prediction convolutions (predict offsets w.r.t prior-boxes and classes in each resulting localization box)
         locs, classes_scores = self.pred_convs(conv4_3_feats, conv7_feats, conv8_2_feats, conv9_2_feats, conv10_2_feats,
                                                conv11_2_feats)  # (N, 8732, 4), (N, 8732, n_classes)
+        # 可视化特征图
+        # show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, conv10_2_feats, conv11_2_feats)
 
         return locs, classes_scores
 
@@ -552,7 +561,7 @@ class MultiBoxLoss(nn.Module):
         self.smooth_l1 = nn.L1Loss()
         self.cross_entropy = nn.CrossEntropyLoss(reduce=False)
 
-    def forward(self, predicted_locs, predicted_scores, boxes, labels):
+    def forward(self, predicted_locs, predicted_scores, boxes, labels, img):
         """
         Forward propagation.
 
@@ -565,18 +574,20 @@ class MultiBoxLoss(nn.Module):
         batch_size = predicted_locs.size(0)
         n_priors = self.priors_cxcy.size(0)
         n_classes = predicted_scores.size(2)
-
         assert n_priors == predicted_locs.size(1) == predicted_scores.size(1)
-
         true_locs = torch.zeros((batch_size, n_priors, 4), dtype=torch.float).to(device)  # (N, 8732, 4)
         true_classes = torch.zeros((batch_size, n_priors), dtype=torch.long).to(device)  # (N, 8732)
+
+        image = img.cpu()
+        img_np = image.numpy()
+        save_dir = './loss_pic'
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
 
         # For each image
         for i in range(batch_size):
             n_objects = boxes[i].size(0)
-
-            overlap = find_jaccard_overlap(boxes[i],
-                                           self.priors_xy)  # (n_objects, 8732)
+            overlap = find_jaccard_overlap(boxes[i],self.priors_xy)  # (n_objects, 8732)
 
             # For each prior, find the object that has the maximum overlap
             overlap_for_each_prior, object_for_each_prior = overlap.max(dim=0)  # (8732)
@@ -587,15 +598,20 @@ class MultiBoxLoss(nn.Module):
 
             # To remedy this -
             # First, find the prior that has the maximum overlap for each object.
-            _, prior_for_each_object = overlap.max(dim=1)  # (N_o)
-
+            iou, prior_for_each_object = overlap.max(dim=1)  # (N_o)
+# 
+            # 画出真值框，选出的初始框（与真值最匹配的那个），预测框
+            # show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_locs,self.priors_xy,self.priors_cxcy,prior_for_each_object,predicted_scores)
+            
             # Then, assign each object to the corresponding maximum-overlap-prior. (This fixes 1.)
+            # 把目标对应最大IOU的初始框位置的值设置为（0,1,2...）括号内数字的个数对应真值框的个数
+            # 目的是与label_for_each_prior一行的labels[i]对应，作为labels[i]的索引
             object_for_each_prior[prior_for_each_object] = torch.LongTensor(range(n_objects)).to(device)
-
             # To ensure these priors qualify, artificially give them an overlap of greater than 0.5. (This fixes 2.)
             overlap_for_each_prior[prior_for_each_object] = 1.
 
             # Labels for each prior
+            # 给每一个prior打标签，把object_for_each_prior中每一个变量当做索引，在 labels[i]中寻找对应的变量
             label_for_each_prior = labels[i][object_for_each_prior]  # (8732)
             # Set priors whose overlaps with objects are less than the threshold to be background (no object)
             label_for_each_prior[overlap_for_each_prior < self.threshold] = 0  # (8732)
@@ -610,10 +626,8 @@ class MultiBoxLoss(nn.Module):
         positive_priors = true_classes != 0  # (N, 8732)
 
         # LOCALIZATION LOSS
-
         # Localization loss is computed only over positive (non-background) priors
         loc_loss = self.smooth_l1(predicted_locs[positive_priors], true_locs[positive_priors])  # (), scalar
-
         # Note: indexing with a torch.uint8 (byte) tensor flattens the tensor when indexing is across multiple dimensions (N & 8732)
         # So, if predicted_locs has the shape (N, 8732, 4), predicted_locs[positive_priors] will have (total positives, 4)
 

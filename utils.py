@@ -4,13 +4,22 @@ import torch
 import random
 import xml.etree.ElementTree as ET
 import torchvision.transforms.functional as FT
-
+import logging
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFont
+import numpy as np
+import cv2
+import torch.nn.functional as F
+from ipdb import set_trace
+from matplotlib import pyplot as plt
+logging.basicConfig(level=logging.INFO)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+a = 0
 # Label map
 #voc_labels = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
 #             'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor')
-voc_labels = ('nine', 'ten', 'jack', 'queen', 'king', 'ace')
+voc_labels = ('nine','ten','jack','queen','king','ace')
 label_map = {k: v + 1 for v, k in enumerate(voc_labels)}
 label_map['background'] = 0
 rev_label_map = {v: k for k, v in label_map.items()}  # Inverse mapping
@@ -102,6 +111,7 @@ def create_data_lists(voc07_path, voc12_path, output_folder):
     # Find IDs of images in the test data
     with open(os.path.join(voc07_path, 'ImageSets/Main/test.txt')) as f:
         ids = f.read().splitlines()
+        print(ids)
 
     for id in ids:
         # Parse annotation's XML file
@@ -340,11 +350,11 @@ def gcxgcy_to_cxcy(gcxgcy, priors_cxcy):
 
 def find_intersection(set_1, set_2):
     """
-    Find the intersection of every box combination between two sets of boxes that are in boundary coordinates.
+    # Find the intersection of every box combination between two sets of boxes that are in boundary coordinates.
 
-    :param set_1: set 1, a tensor of dimensions (n1, 4)
-    :param set_2: set 2, a tensor of dimensions (n2, 4)
-    :return: intersection of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
+    # :param set_1: set 1, a tensor of dimensions (n1, 4)
+    # :param set_2: set 2, a tensor of dimensions (n2, 4)
+    # :return: intersection of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
     """
 
     # PyTorch auto-broadcasts singleton dimensions
@@ -365,7 +375,7 @@ def find_jaccard_overlap(set_1, set_2):
 
     # Find intersections
     intersection = find_intersection(set_1, set_2)  # (n1, n2)
-
+    # set_trace()
     # Find areas of each box in both sets
     areas_set_1 = (set_1[:, 2] - set_1[:, 0]) * (set_1[:, 3] - set_1[:, 1])  # (n1)
     areas_set_2 = (set_2[:, 2] - set_2[:, 0]) * (set_2[:, 3] - set_2[:, 1])  # (n2)
@@ -542,6 +552,7 @@ def resize(image, boxes, dims=(300, 300), return_percent_coords=True):
     # Resize bounding boxes
     old_dims = torch.FloatTensor([image.width, image.height, image.width, image.height]).unsqueeze(0)
     new_boxes = boxes / old_dims  # percent coordinates
+    
 
     if not return_percent_coords:
         new_dims = torch.FloatTensor([dims[1], dims[0], dims[1], dims[0]]).unsqueeze(0)
@@ -593,7 +604,8 @@ def transform(image, boxes, labels, difficulties, split):
     :return: transformed image, transformed bounding box coordinates, transformed labels, transformed difficulties
     """
     assert split in {'TRAIN', 'TEST'}
-
+    global a
+    a = a+1
     # Mean and standard deviation of ImageNet data that our base VGG from torchvision was trained on
     # see: https://pytorch.org/docs/stable/torchvision/models.html
     # 官方VOC2007均值方差
@@ -602,44 +614,62 @@ def transform(image, boxes, labels, difficulties, split):
     #自制扑克数据集
     mean = [0.618757, 0.551742, 0.485257]
     std = [0.207053, 0.214579, 0.216683]
+    # image.show()
 
     new_image = image
     new_boxes = boxes
     new_labels = labels
     new_difficulties = difficulties
+
     # Skip the following operations for evaluation/testing
     if split == 'TRAIN':
+        # 保存原始样本
+        row_image = new_image
+
         # A series of photometric distortions in random order, each with 50% chance of occurrence, as in Caffe repo
         new_image = photometric_distort(new_image)
+        photometric_distort_image = new_image
 
         # Convert PIL image to Torch tensor
-        new_image = FT.to_tensor(new_image)
-
+        new_image = FT.to_tensor(new_image)             # [3, x, y]
         # Expand image (zoom out) with a 50% chance - helpful for training detection of small objects
         # Fill surrounding space with the mean of ImageNet data that our base VGG was trained on
         if random.random() < 0.5:
             new_image, new_boxes = expand(new_image, boxes, filler=mean)
+            img = FT.to_pil_image(new_image)
+            Expand_image = img
+        else :
+            Expand_image = None
 
         # Randomly crop image (zoom in)
-        new_image, new_boxes, new_labels, new_difficulties = random_crop(new_image, new_boxes, new_labels,
-                                                                         new_difficulties)
-
+        new_image, new_boxes, new_labels, new_difficulties = random_crop(new_image, new_boxes, new_labels,new_difficulties)
+        
         # Convert Torch tensor to PIL image
         new_image = FT.to_pil_image(new_image)
+        random_crop_image = new_image
 
         # Flip image with a 50% chance
         if random.random() < 0.5:
             new_image, new_boxes = flip(new_image, new_boxes)
+            Flip_image = new_image
+        else :
+            Flip_image = None    
 
     # Resize image to (300, 300) - this also converts absolute boundary coordinates to their fractional form
     new_image, new_boxes = resize(new_image, new_boxes, dims=(300, 300))
-
+    resize_image = new_image
+        
     # Convert PIL image to Torch tensor
     new_image = FT.to_tensor(new_image)
 
     # Normalize by mean and standard deviation of ImageNet data that our base VGG was trained on
     new_image = FT.normalize(new_image, mean=mean, std=std)
+    img = FT.to_pil_image(new_image)
+    Normalize_image = img
 
+    # 可视化样本增强
+    # show_transform_pic(a,row_image,photometric_distort_image,Expand_image,random_crop_image,Flip_image,resize_image,Normalize_image)
+    
     return new_image, new_boxes, new_labels, new_difficulties
 
 
@@ -685,7 +715,6 @@ def save_checkpoint(epoch, model, optimizer):
     filename = 'checkpoint_ssd300.pth.tar'
     torch.save(state, filename)
 
-
 class AverageMeter(object):
     """
     Keeps track of most recent, average, sum, and count of a metric.
@@ -706,7 +735,6 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-
 def clip_gradient(optimizer, grad_clip):
     """
     Clips gradients computed during backpropagation to avoid explosion of gradients.
@@ -717,11 +745,7 @@ def clip_gradient(optimizer, grad_clip):
     for group in optimizer.param_groups:
         for param in group['params']:
             if param.grad is not None:
-                param.grad.data.clamp_(-grad_clip, grad_clip)
-
-                
-                
-                
+                param.grad.data.clamp_(-grad_clip, grad_clip)    
 
 def create_voc_only_data_lists(voc07_path, output_folder):
     """
@@ -732,14 +756,14 @@ def create_voc_only_data_lists(voc07_path, output_folder):
     :param output_folder: folder where the JSONs must be saved
     """
     voc07_path = os.path.abspath(voc07_path)
-#    voc12_path = os.path.abspath(voc12_path)
+    # voc12_path = os.path.abspath(voc12_path)
 
     train_images = list()
     train_objects = list()
     n_objects = 0
 
     # Training data
-#    for path in [voc07_path, voc12_path]:
+    # for path in [voc07_path, voc12_path]:
     for path in [voc07_path]:
         # Find IDs of images in training data
         with open(os.path.join(path, 'ImageSets/Main/trainval.txt')) as f:
@@ -773,7 +797,7 @@ def create_voc_only_data_lists(voc07_path, output_folder):
     n_objects = 0
 
     # Find IDs of images in the test data
-    with open(os.path.join(voc07_path, 'ImageSets/Main/val.txt')) as f:
+    with open(os.path.join(voc07_path, 'ImageSets/Main/test.txt')) as f:
         ids = f.read().splitlines()
 
     for id in ids:
@@ -796,3 +820,236 @@ def create_voc_only_data_lists(voc07_path, output_folder):
     print('\nThere are %d test images containing a total of %d objects. Files have been saved to %s.' % (
         len(test_images), n_objects, os.path.abspath(output_folder)))
 
+def show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_locs,priors_xy,priors_cxcy,prior_for_each_object,predicted_scores):
+    """ 
+    展示真值框，初始框，预测框并保存
+    :param img_np: 原始图像
+    :param save_dir: 结果图像保存地址
+    :param boxes: 真值框
+    :param iou: 真值框与初始框的IOU
+    :param predicted_locs: 预测框
+    :param priors_xy: 初始框（xmin,xmax,ymin,ymax）
+    :param priors_cxcy: 初始框（中心点+wh）
+    :param prior_for_each_object: 每个真值框对应的初始框
+    :param predicted_scores:预测的分数
+    """
+    predicted_scores = F.softmax(predicted_scores, dim=2)
+    # 绘制图片和真值框
+    img = img_np[i].transpose([1,2,0])      #取出其中一张并转换维度
+    img = (img - np.min(img))/(np.max(img) - np.min(img)) *255.0  #转为0-255
+    img = img.astype(int)                #转换数据类型
+    cv2.imwrite(save_dir+'/{}.jpg'.format(i), img)             #保存为图片
+    
+
+    # 画出与真值框最匹配的初始框
+    box_prior_draw =  priors_xy [prior_for_each_object]
+    # 遍历所有目标对应的初始框（因为一张图片中有可能有好几个目标，则对应好几个初始框）
+    for ii,box in enumerate(box_prior_draw):
+        # 绘制矩形框
+        x = (300*boxes[i]).int()[ii][0].item()
+        y = (300*boxes[i]).int()[ii][1].item()
+        x1 = (300*boxes[i]).int()[ii][2].item()
+        y1 = (300*boxes[i]).int()[ii][3].item()
+        # 真值框
+        img_PIL = Image.open(save_dir+'/{}.jpg'.format(i))
+        draw=ImageDraw.ImageDraw(img_PIL)
+        draw=ImageDraw.ImageDraw(img_PIL)
+        draw.rectangle((x,y,x1,y1),fill=None,outline=(0, 255, 0))#绿色
+        draw.text([x, y], 'ground truth', (0, 255, 0))
+        # img_PIL.show()
+        img_PIL.save(save_dir+'/{}.jpg'.format(i))
+        img_PIL = Image.open(save_dir+'/{}.jpg'.format(i))
+        # 绘制矩形框
+        x = (300*box).int()[0].item()
+        y = (300*box).int()[1].item()
+        x1 = (300*box).int()[2].item()
+        y1 = (300*box).int()[3].item()
+        # 初始框
+        draw=ImageDraw.ImageDraw(img_PIL)
+        draw=ImageDraw.ImageDraw(img_PIL)
+        draw.rectangle((x,y,x1,y1),fill=None,outline=(0, 0, 255))#蓝色
+        draw.text([x, y], 'prior_box-iou:{:.2f}'.format(iou[ii]), (0,0,255))
+        img_PIL.save(save_dir+'/{}.jpg'.format(i))
+        # img_PIL.show()
+        # 预测框
+        decoded_locs_draw = cxcy_to_xy(gcxgcy_to_cxcy(predicted_locs[i], priors_cxcy))  # (8732, 4), these are fractional pt. coordinates
+        predicts_box = decoded_locs_draw[prior_for_each_object[ii]]
+        img_PIL = Image.open(save_dir+'/{}.jpg'.format(i))
+        # 绘制矩形框
+        x = (300*predicts_box).int()[0].item()
+        y = (300*predicts_box).int()[1].item()
+        x1 = (300*predicts_box).int()[2].item()
+        y1 = (300*predicts_box).int()[3].item()
+        # 预测框
+        draw=ImageDraw.ImageDraw(img_PIL)
+        draw=ImageDraw.ImageDraw(img_PIL)
+        draw.rectangle((x,y,x1,y1),fill=None,outline=(255, 0, 0))#红色
+        score_max = predicted_scores[i][prior_for_each_object[ii]].max().item()
+        max_score_index =  predicted_scores[i][prior_for_each_object[ii]].detach().cpu()\
+                                            .numpy().tolist().index(score_max)
+        draw.text([x, y], 'predict_box\nscore:{:.2f}\nindex:{}'.format(score_max,max_score_index), (255,0,0))
+        # img_PIL.show()
+        img_PIL.save(save_dir+'/{}.jpg'.format(i))
+        print(save_dir+'/{}.jpg'.format(i))
+    set_trace()
+
+def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, conv10_2_feats, conv11_2_feats):
+    """ 
+    展示特征图并保存
+    :param conv4_3_feats: conv4_3_feats特征图
+    :param conv7_feats: conv7_feats特征图
+    :param conv8_2_feats: conv8_2_feats特征图
+    :param conv9_2_feats: conv9_2_feats特横图
+    :param conv10_2_feats: conv10_2_feats特征图
+    :param conv11_2_feats: conv11_2_feats特征图
+    """
+    save_dir = './show_feature_map'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+
+    # 可视化conv4_3_feats层
+    for feature_map in conv4_3_feats:
+        im = np.squeeze(feature_map.detach().cpu().numpy())
+        im = np.transpose(im, [1, 2, 0])
+        plt.figure(figsize=(50,40)  , dpi=100)
+        for i in range(512):
+            ax = plt.subplot(23, 23, i+1)
+            cmap = 'nipy_spectral'
+            plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
+        plt.savefig('./show_feature_map/conv4_3_feats.jpg')
+        print('conv4_3_feats.jpg---finish!')
+        print('./show_feature_map/conv4_3_feats.jpg')
+        # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
+        break
+
+    # 可视化conv7_feats层
+    for feature_map in conv7_feats:
+        im = np.squeeze(feature_map.detach().cpu().numpy())
+        im = np.transpose(im, [1, 2, 0])
+        plt.figure(figsize=(60,50)  , dpi=100)
+        for i in range(1024):
+            ax = plt.subplot(32, 32, i+1)
+            cmap = 'nipy_spectral'
+            plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
+        # plt.show()
+        plt.savefig('./show_feature_map/conv7_feats.jpg')
+        print('conv7_feats.jpg---finish!')
+        print('./show_feature_map/conv7_feats.jpg')
+        # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
+        break
+
+    # 可视化conv8_2_feats层
+    for feature_map in conv8_2_feats:
+        im = np.squeeze(feature_map.detach().cpu().numpy())
+        im = np.transpose(im, [1, 2, 0])
+        plt.figure(figsize=(50,40)  , dpi=100)
+        for i in range(512):
+            ax = plt.subplot(23, 23, i+1)
+            cmap = 'nipy_spectral'
+            plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
+        plt.savefig('./show_feature_map/conv8_2_feats.jpg')
+        print('conv8_2_feats.jpg---finish!')
+        print('./show_feature_map/conv8_2_feats.jpg')
+        # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
+        break
+
+    # # 可视化conv9_2_feats层
+    for feature_map in conv9_2_feats:
+        im = np.squeeze(feature_map.detach().cpu().numpy())
+        im = np.transpose(im, [1, 2, 0])
+        plt.figure(figsize=(40,30)  , dpi=100)
+        for i in range(256):
+            ax = plt.subplot(16, 16, i+1)
+            cmap = 'nipy_spectral'
+            plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
+        plt.savefig('./show_feature_map/conv9_2_feats.jpg')
+        print('conv9_2_feats.jpg---finish!')
+        print('./show_feature_map/conv9_2_feats.jpg')
+        # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
+        break
+
+    # # 可视化conv10_2_feats层
+    for feature_map in conv10_2_feats:
+        im = np.squeeze(feature_map.detach().cpu().numpy())
+        im = np.transpose(im, [1, 2, 0])
+        plt.figure(figsize=(40,30)  , dpi=100)
+        for i in range(256):
+            ax = plt.subplot(16, 16, i+1)
+            cmap = 'nipy_spectral'
+            plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
+        plt.savefig('./show_feature_map/conv10_2_feats.jpg')
+        print('conv10_2_feats.jpg---finish!')
+        print('./show_feature_map/conv10_2_feats.jpg')
+        # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
+        break
+    set_trace()
+
+def show_train_pic(images,boxes,i):
+    """ 
+    展示训练图像并保存
+    :param images: 训练图像
+    :param boxes: 真值框
+    :param i: 批次信息
+    """
+
+    image = images
+    img_np = image.numpy()
+    save_dir = './train_pic_show/{}'.format(i)
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir) 
+
+    for j in range(img_np.shape[0]):
+        img = img_np[j].transpose([1,2,0])      #取出其中一张并转换维度
+        img = (img - np.min(img))/(np.max(img) - np.min(img)) *255.0  #转为0-255
+        img = img.astype(int)                #转换数据类型
+        cv2.imwrite(save_dir+'/{}.jpg'.format(j), img)   #保存为图片
+        # 绘制矩形框
+        for box in boxes[j]:
+            x = (300*box).int()[0].item()
+            y = (300*box).int()[1].item()
+            x1 = (300*box).int()[2].item()
+            y1 = (300*box).int()[3].item()
+            img_PIL = Image.open(save_dir+'/{}.jpg'.format(j))
+            b=ImageDraw.ImageDraw(img_PIL)
+            b.rectangle((x,y,x1,y1),fill=None,outline='green')
+            img_PIL.save(save_dir+'/{}.jpg'.format(j))
+            # img_PIL.show()
+    set_trace()
+
+def show_transform_pic(a,row_image,photometric_distort_image,Expand_image,random_crop_image,Flip_image,resize_image,Normalize_image):
+    save_dir = './show_transform_pic/row'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    row_image.save(save_dir+'/{}.png'.format(a))
+
+    save_dir = './show_transform_pic/resize'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    resize_image.save(save_dir+'/{}.png'.format(a))
+
+    save_dir = './show_transform_pic/random_crop'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    random_crop_image.save(save_dir+'/{}.png'.format(a))
+
+    save_dir = './show_transform_pic/photometric_distort'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    photometric_distort_image.save(save_dir+'/{}.png'.format(a))
+
+    save_dir = './show_transform_pic/Flip'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    if Flip_image != None:
+        Flip_image.save(save_dir+'/{}.png'.format(a))
+        
+    save_dir = './show_transform_pic/expand'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    if Expand_image != None:
+        Expand_image.save(save_dir+'/{}.png'.format(a))
+        
+    save_dir = './show_transform_pic/Normalize'
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    Normalize_image.save(save_dir+'/{}.png'.format(a))

@@ -4,7 +4,9 @@ import json
 import os
 from PIL import Image
 from utils import transform
-
+import numpy as np
+import cv2
+import os
 
 class PascalVOCDataset(Dataset):
     """
@@ -36,7 +38,6 @@ class PascalVOCDataset(Dataset):
         # Read image
         image = Image.open(self.images[i], mode='r')
         image = image.convert('RGB')
-
         # Read objects in this image (bounding boxes, labels, difficulties)
         objects = self.objects[i]
         boxes = torch.FloatTensor(objects['boxes'])  # (n_objects, 4)
@@ -48,8 +49,7 @@ class PascalVOCDataset(Dataset):
             boxes = boxes[1 - difficulties]
             labels = labels[1 - difficulties]
             difficulties = difficulties[1 - difficulties]
-
-        # Apply transformations
+        
         image, boxes, labels, difficulties = transform(image, boxes, labels, difficulties, split=self.split)
 
         return image, boxes, labels, difficulties
@@ -73,7 +73,6 @@ class PascalVOCDataset(Dataset):
         boxes = list()
         labels = list()
         difficulties = list()
-
         for b in batch:
             images.append(b[0])
             boxes.append(b[1])
@@ -81,5 +80,4 @@ class PascalVOCDataset(Dataset):
             difficulties.append(b[3])
 
         images = torch.stack(images, dim=0)
-
         return images, boxes, labels, difficulties  # tensor (N, 3, 300, 300), 3 lists of N tensors each

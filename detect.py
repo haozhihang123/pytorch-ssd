@@ -18,9 +18,7 @@ model.eval()
 # Transforms
 resize = transforms.Resize((300, 300))
 to_tensor = transforms.ToTensor()
-normalize = transforms.Normalize( mean = [0.618757, 0.551742, 0.485257],
-    std = [0.207053, 0.214579, 0.216683])
-
+normalize = transforms.Normalize(mean=[1.699449, 1.565750, 1.419592], std=[2.711962, 2.504607, 2.274658])
 
 def detect(original_image,img_name, min_score, max_overlap, top_k, suppress=None):
     """
@@ -39,7 +37,6 @@ def detect(original_image,img_name, min_score, max_overlap, top_k, suppress=None
 
     # Move to default device
     image = image.to(device)
-
     # Forward prop.
     predicted_locs, predicted_scores = model(image.unsqueeze(0))
 
@@ -88,7 +85,7 @@ def detect(original_image,img_name, min_score, max_overlap, top_k, suppress=None
         textbox_location = [box_location[0], box_location[1] - text_size[1], box_location[0] + text_size[0] + 4.,
                             box_location[1]]
         draw.rectangle(xy=textbox_location, fill=label_color_map[det_labels[i]])
-        draw.text(xy=text_location, text=det_labels[i]+'    '+str(det_scores[0][i].item())[:5], fill='white',     
+        draw.text(xy=text_location, text=det_labels[i]+'    '+str(det_scores[0][i].item())[:5], fill='blue',     
                   font=font)
     del draw
     annotated_image.save(result_dir + img_name) #保存
@@ -101,7 +98,7 @@ def detection_some_pic():
         original_image = Image.open(img_path, mode='r')
         original_image = original_image.convert('RGB')
         #detect(original_image, pic, min_score=0.2, max_overlap=0.5, top_k=200).show()
-        detect(original_image, pic, min_score=0.5, max_overlap=0.1, top_k=100)
+        detect(original_image, pic, min_score=0.4, max_overlap=0.1, top_k=100)
         print('{}-test finish!'.format(pic))
 
 if __name__ == '__main__':
