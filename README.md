@@ -32,3 +32,5 @@
       相关博客参考：https://blog.csdn.net/weixin_44791964/article/details/104695264
      
 （６）原始测试图片的程序只能测试一张，增加测试多张图像，原始图像存放在test_data，检测结果存放在test_val_result，所用程序为detect.py。
+
+原作者程序参考：原作者README.md
