@@ -2,6 +2,7 @@ from torchvision import transforms
 from utils import *
 from PIL import Image, ImageDraw, ImageFont
 import os
+from ipdb import set_trace
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,6 +34,7 @@ def detect(original_image,img_name, min_score, max_overlap, top_k, suppress=None
     """
 
     # Transform
+
     image = normalize(to_tensor(resize(original_image)))
 
     # Move to default device
@@ -89,6 +91,7 @@ def detect(original_image,img_name, min_score, max_overlap, top_k, suppress=None
                   font=font)
     del draw
     annotated_image.save(result_dir + img_name) #保存
+    # set_trace()
     return annotated_image
 
 def detection_some_pic():
@@ -96,9 +99,12 @@ def detection_some_pic():
     for pic in  os.listdir(data_folder):
         img_path = data_folder + pic
         original_image = Image.open(img_path, mode='r')
+        # original_image.show()
+        
         original_image = original_image.convert('RGB')
         #detect(original_image, pic, min_score=0.2, max_overlap=0.5, top_k=200).show()
-        detect(original_image, pic, min_score=0.4, max_overlap=0.1, top_k=100)
+        detect_img = detect(original_image, pic, min_score=0.5, max_overlap=0.05, top_k=100)
+        # detect_img.show()
         print('{}-test finish!'.format(pic))
 
 if __name__ == '__main__':

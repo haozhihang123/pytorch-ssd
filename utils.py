@@ -17,9 +17,10 @@ logging.basicConfig(level=logging.INFO)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 a = 0
 # Label map
-#voc_labels = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
+# voc_labels = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
 #             'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor')
-voc_labels = ('nine','ten','jack','queen','king','ace')
+# voc_labels = ('nine','ten','jack','queen','king','ace')
+voc_labels = ('ws',)
 label_map = {k: v + 1 for v, k in enumerate(voc_labels)}
 label_map['background'] = 0
 rev_label_map = {v: k for k, v in label_map.items()}  # Inverse mapping
@@ -39,18 +40,19 @@ def parse_annotation(annotation_path):
     labels = list()
     difficulties = list()
     for object in root.iter('object'):
-
-        difficult = int(object.find('difficult').text == '1')
-
+        try:
+            difficult = int(object.find('difficult').text == '1')
+        except:
+            difficult = 0
         label = object.find('name').text.lower().strip()
         if label not in label_map:
             continue
 
         bbox = object.find('bndbox')
-        xmin = int(bbox.find('xmin').text) - 1
-        ymin = int(bbox.find('ymin').text) - 1
-        xmax = int(bbox.find('xmax').text) - 1
-        ymax = int(bbox.find('ymax').text) - 1
+        xmin = int(bbox.find('xmin').text)
+        ymin = int(bbox.find('ymin').text)
+        xmax = int(bbox.find('xmax').text)
+        ymax = int(bbox.find('ymax').text)
 
         boxes.append([xmin, ymin, xmax, ymax])
         labels.append(label_map[label])
@@ -59,7 +61,7 @@ def parse_annotation(annotation_path):
     return {'boxes': boxes, 'labels': labels, 'difficulties': difficulties}
 
 
-def create_data_lists(voc07_path, voc12_path, output_folder):
+def create_data_lists(voc07_path,output_folder):
     """
     Create lists of images, the bounding boxes and labels of the objects in these images, and save these to file.
 
@@ -68,14 +70,13 @@ def create_data_lists(voc07_path, voc12_path, output_folder):
     :param output_folder: folder where the JSONs must be saved
     """
     voc07_path = os.path.abspath(voc07_path)
-    voc12_path = os.path.abspath(voc12_path)
 
     train_images = list()
     train_objects = list()
     n_objects = 0
 
     # Training data
-    for path in [voc07_path, voc12_path]:
+    for path in [voc07_path]:
 
         # Find IDs of images in training data
         with open(os.path.join(path, 'ImageSets/Main/trainval.txt')) as f:
@@ -111,7 +112,6 @@ def create_data_lists(voc07_path, voc12_path, output_folder):
     # Find IDs of images in the test data
     with open(os.path.join(voc07_path, 'ImageSets/Main/test.txt')) as f:
         ids = f.read().splitlines()
-        print(ids)
 
     for id in ids:
         # Parse annotation's XML file
@@ -423,8 +423,7 @@ def expand(image, boxes, filler):
     new_image[:, top:bottom, left:right] = image
 
     # Adjust bounding boxes' coordinates accordingly
-    new_boxes = boxes + torch.FloatTensor([left, top, left, top]).unsqueeze(
-        0)  # (n_objects, 4), n_objects is the no. of objects in this image
+    new_boxes = boxes + torch.FloatTensor([left, top, left, top]).unsqueeze(0)  # (n_objects, 4), n_objects is the no. of objects in this image
 
     return new_image, new_boxes
 
@@ -747,78 +746,7 @@ def clip_gradient(optimizer, grad_clip):
             if param.grad is not None:
                 param.grad.data.clamp_(-grad_clip, grad_clip)    
 
-def create_voc_only_data_lists(voc07_path, output_folder):
-    """
-    Create lists of images, the bounding boxes and labels of the objects in these images, and save these to file.
 
-    :param voc07_path: path to the 'VOC2007' folder
-    :param voc12_path: path to the 'VOC2012' folder
-    :param output_folder: folder where the JSONs must be saved
-    """
-    voc07_path = os.path.abspath(voc07_path)
-    # voc12_path = os.path.abspath(voc12_path)
-
-    train_images = list()
-    train_objects = list()
-    n_objects = 0
-
-    # Training data
-    # for path in [voc07_path, voc12_path]:
-    for path in [voc07_path]:
-        # Find IDs of images in training data
-        with open(os.path.join(path, 'ImageSets/Main/trainval.txt')) as f:
-            ids = f.read().splitlines()
-
-        for id in ids:
-            # Parse annotation's XML file
-            objects = parse_annotation(os.path.join(path, 'Annotations', id + '.xml'))
-            if len(objects) == 0:
-                continue
-            n_objects += len(objects)
-            train_objects.append(objects)
-            train_images.append(os.path.join(path, 'JPEGImages', id + '.jpg'))
-
-    assert len(train_objects) == len(train_images)
-
-    # Save to file
-    with open(os.path.join(output_folder, 'TRAIN_images.json'), 'w') as j:
-        json.dump(train_images, j)
-    with open(os.path.join(output_folder, 'TRAIN_objects.json'), 'w') as j:
-        json.dump(train_objects, j)
-    with open(os.path.join(output_folder, 'label_map.json'), 'w') as j:
-        json.dump(label_map, j)  # save label map too
-
-    print('\nThere are %d training images containing a total of %d objects. Files have been saved to %s.' % (
-        len(train_images), n_objects, os.path.abspath(output_folder)))
-
-    # Test data
-    test_images = list()
-    test_objects = list()
-    n_objects = 0
-
-    # Find IDs of images in the test data
-    with open(os.path.join(voc07_path, 'ImageSets/Main/test.txt')) as f:
-        ids = f.read().splitlines()
-
-    for id in ids:
-        # Parse annotation's XML file
-        objects = parse_annotation(os.path.join(voc07_path, 'Annotations', id + '.xml'))
-        if len(objects) == 0:
-            continue
-        test_objects.append(objects)
-        n_objects += len(objects)
-        test_images.append(os.path.join(voc07_path, 'JPEGImages', id + '.jpg'))
-
-    assert len(test_objects) == len(test_images)
-
-    # Save to file
-    with open(os.path.join(output_folder, 'TEST_images.json'), 'w') as j:
-        json.dump(test_images, j)
-    with open(os.path.join(output_folder, 'TEST_objects.json'), 'w') as j:
-        json.dump(test_objects, j)
-
-    print('\nThere are %d test images containing a total of %d objects. Files have been saved to %s.' % (
-        len(test_images), n_objects, os.path.abspath(output_folder)))
 
 def show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_locs,priors_xy,priors_cxcy,prior_for_each_object,predicted_scores):
     """ 
@@ -838,7 +766,7 @@ def show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_l
     img = img_np[i].transpose([1,2,0])      #取出其中一张并转换维度
     img = (img - np.min(img))/(np.max(img) - np.min(img)) *255.0  #转为0-255
     img = img.astype(int)                #转换数据类型
-    cv2.imwrite(save_dir+'/{}.jpg'.format(i), img)             #保存为图片
+    cv2.imwrite(save_dir+'/{}.png'.format(i), img)             #保存为图片
     
 
     # 画出与真值框最匹配的初始框
@@ -851,14 +779,14 @@ def show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_l
         x1 = (300*boxes[i]).int()[ii][2].item()
         y1 = (300*boxes[i]).int()[ii][3].item()
         # 真值框
-        img_PIL = Image.open(save_dir+'/{}.jpg'.format(i))
+        img_PIL = Image.open(save_dir+'/{}.png'.format(i))
         draw=ImageDraw.ImageDraw(img_PIL)
         draw=ImageDraw.ImageDraw(img_PIL)
         draw.rectangle((x,y,x1,y1),fill=None,outline=(0, 255, 0))#绿色
         draw.text([x, y], 'ground truth', (0, 255, 0))
         # img_PIL.show()
-        img_PIL.save(save_dir+'/{}.jpg'.format(i))
-        img_PIL = Image.open(save_dir+'/{}.jpg'.format(i))
+        img_PIL.save(save_dir+'/{}.png'.format(i))
+        img_PIL = Image.open(save_dir+'/{}.png'.format(i))
         # 绘制矩形框
         x = (300*box).int()[0].item()
         y = (300*box).int()[1].item()
@@ -869,12 +797,12 @@ def show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_l
         draw=ImageDraw.ImageDraw(img_PIL)
         draw.rectangle((x,y,x1,y1),fill=None,outline=(0, 0, 255))#蓝色
         draw.text([x, y], 'prior_box-iou:{:.2f}'.format(iou[ii]), (0,0,255))
-        img_PIL.save(save_dir+'/{}.jpg'.format(i))
+        img_PIL.save(save_dir+'/{}.png'.format(i))
         # img_PIL.show()
         # 预测框
         decoded_locs_draw = cxcy_to_xy(gcxgcy_to_cxcy(predicted_locs[i], priors_cxcy))  # (8732, 4), these are fractional pt. coordinates
         predicts_box = decoded_locs_draw[prior_for_each_object[ii]]
-        img_PIL = Image.open(save_dir+'/{}.jpg'.format(i))
+        img_PIL = Image.open(save_dir+'/{}.png'.format(i))
         # 绘制矩形框
         x = (300*predicts_box).int()[0].item()
         y = (300*predicts_box).int()[1].item()
@@ -889,8 +817,8 @@ def show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_l
                                             .numpy().tolist().index(score_max)
         draw.text([x, y], 'predict_box\nscore:{:.2f}\nindex:{}'.format(score_max,max_score_index), (255,0,0))
         # img_PIL.show()
-        img_PIL.save(save_dir+'/{}.jpg'.format(i))
-        print(save_dir+'/{}.jpg'.format(i))
+        img_PIL.save(save_dir+'/{}.png'.format(i))
+        print(save_dir+'/{}.png'.format(i))
     set_trace()
 
 def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, conv10_2_feats, conv11_2_feats):
@@ -916,9 +844,9 @@ def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, co
             ax = plt.subplot(23, 23, i+1)
             cmap = 'nipy_spectral'
             plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
-        plt.savefig('./show_feature_map/conv4_3_feats.jpg')
-        print('conv4_3_feats.jpg---finish!')
-        print('./show_feature_map/conv4_3_feats.jpg')
+        plt.savefig('./show_feature_map/conv4_3_feats.png')
+        print('conv4_3_feats.png---finish!')
+        print('./show_feature_map/conv4_3_feats.png')
         # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
         break
 
@@ -932,9 +860,9 @@ def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, co
             cmap = 'nipy_spectral'
             plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
         # plt.show()
-        plt.savefig('./show_feature_map/conv7_feats.jpg')
-        print('conv7_feats.jpg---finish!')
-        print('./show_feature_map/conv7_feats.jpg')
+        plt.savefig('./show_feature_map/conv7_feats.png')
+        print('conv7_feats.png---finish!')
+        print('./show_feature_map/conv7_feats.png')
         # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
         break
 
@@ -947,9 +875,9 @@ def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, co
             ax = plt.subplot(23, 23, i+1)
             cmap = 'nipy_spectral'
             plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
-        plt.savefig('./show_feature_map/conv8_2_feats.jpg')
-        print('conv8_2_feats.jpg---finish!')
-        print('./show_feature_map/conv8_2_feats.jpg')
+        plt.savefig('./show_feature_map/conv8_2_feats.png')
+        print('conv8_2_feats.png---finish!')
+        print('./show_feature_map/conv8_2_feats.png')
         # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
         break
 
@@ -962,9 +890,9 @@ def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, co
             ax = plt.subplot(16, 16, i+1)
             cmap = 'nipy_spectral'
             plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
-        plt.savefig('./show_feature_map/conv9_2_feats.jpg')
-        print('conv9_2_feats.jpg---finish!')
-        print('./show_feature_map/conv9_2_feats.jpg')
+        plt.savefig('./show_feature_map/conv9_2_feats.png')
+        print('conv9_2_feats.png---finish!')
+        print('./show_feature_map/conv9_2_feats.png')
         # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
         break
 
@@ -977,9 +905,9 @@ def show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, co
             ax = plt.subplot(16, 16, i+1)
             cmap = 'nipy_spectral'
             plt.imshow(im[:, :, i], cmap=plt.get_cmap(cmap))
-        plt.savefig('./show_feature_map/conv10_2_feats.jpg')
-        print('conv10_2_feats.jpg---finish!')
-        print('./show_feature_map/conv10_2_feats.jpg')
+        plt.savefig('./show_feature_map/conv10_2_feats.png')
+        print('conv10_2_feats.png---finish!')
+        print('./show_feature_map/conv10_2_feats.png')
         # 每个批次有10张图，也就是有10个conv4_3特征图，只保留一个
         break
     set_trace()
@@ -994,7 +922,7 @@ def show_train_pic(images,boxes,i):
 
     image = images
     img_np = image.numpy()
-    save_dir = './train_pic_show/{}'.format(i)
+    save_dir = './show_pic_train/{}'.format(i)
     if not os.path.isdir(save_dir):
         os.makedirs(save_dir) 
 

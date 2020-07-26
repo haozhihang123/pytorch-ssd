@@ -1,45 +1,53 @@
-import time
+
+import torchvision.transforms.functional as FT
 import torch.backends.cudnn as cudnn
-import torch.optim
-import torch.utils.data
 from model import SSD300, MultiBoxLoss
 from datasets import PascalVOCDataset
-from utils import *
-from ipdb import set_trace
-import logging
 import matplotlib.pyplot as plt
-import torch
-import numpy
-import torchvision.transforms.functional as FT
-from PIL import Image
+from eval_map import evaluate
+from ipdb import set_trace
 from PIL import ImageDraw
 from PIL import ImageFont
-logging.basicConfig(level=logging.INFO)
+from PIL import Image
+import torch.utils.data
+import torch.optim
+from utils import *
+import numpy as np
+import logging
+import torch
+import time
+
 # Data parameters
-data_folder = './json/'  # folder with data files        // json dir
+data_folder = './json'  # folder with data files
 keep_difficult = True  # use objects considered difficult to detect?
+
 # Model parameters
 # Not too many here since the SSD300 has a very specific structure
 n_classes = len(label_map)  # number of different types of objects
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# set_trace()
+
 # Learning parameters
-checkpoint = './checkpoint_ssd300.pth.tar'  # path to model checkpoint, None if none
-#checkpoint = None
-batch_size = 10  # batch size
-iterations = 120000  # number of iterations to train
-workers = 4  # number of workers for loading data in the DataLoader
-print_freq = 1  # print training status every __ batches
-lr = 1e-4  # learning rate
-decay_lr_at = [100, 200]  # decay learning rate after these many iterations
+checkpoint = None  # path to model checkpoint, None if none
+batch_size = 8  # batch size
+iterations = 12000  # number of iterations to train
+workers = 1  # number of workers for loading data in the DataLoader
+print_freq = 10  # print training status every __ batches
+eval_freq = 10  # print eval status every __ epoch
+lr = 1e-3  # learning rate
+decay_lr_at = [8000, 10000]  # decay learning rate after these many iterations
 decay_lr_to = 0.1  # decay learning rate to this fraction of the existing learning rate
 momentum = 0.9  # momentum
 weight_decay = 5e-4  # weight decay
 grad_clip = None  # clip if gradients are exploding, which may happen at larger batch sizes (sometimes at 32) - you will recognize it by a sorting error in the MuliBox loss calculation
 cudnn.benchmark = True
+
+
 def main():
-    """Training."""
+    """
+    Training.
+    """
     global start_epoch, label_map, epoch, checkpoint, decay_lr_at
+
     # Initialize model or load checkpoint
     if checkpoint is None:
         start_epoch = 0
@@ -55,12 +63,14 @@ def main():
                     not_biases.append(param)
         optimizer = torch.optim.SGD(params=[{'params': biases, 'lr': 2 * lr}, {'params': not_biases}],
                                     lr=lr, momentum=momentum, weight_decay=weight_decay)
+
     else:
         checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         print('\nLoaded checkpoint from epoch %d.\n' % start_epoch)
         model = checkpoint['model']
         optimizer = checkpoint['optimizer']
+
     # Move to default device
     model = model.to(device)
     criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy).to(device)
@@ -69,24 +79,43 @@ def main():
     train_dataset = PascalVOCDataset(data_folder,
                                      split='train',
                                      keep_difficult=keep_difficult)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False,
+    # 显示数据增强后的图像（加标准化）
+    # for image, boxes, labels, difficulties in train_dataset:
+    #     pil_img = FT.to_pil_image(image)
+    #     pil_img.show()
+    #     set_trace()
+    #     tensor_img = FT.to_tensor(pil_img) 
+    #     np_img = tensor_img.numpy()
+    #     np_img = np.transpose(np_img,(1,2,0))  
+    #     plt.imshow(np_img)
+    #     plt.show()
+    #     set_trace()
+                                      
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                                collate_fn=train_dataset.collate_fn, num_workers=workers,
                                                pin_memory=True)  # note that we're passing the collate function here
-    # set_trace()
+
+    # eval data
+    test_dataset = PascalVOCDataset(data_folder,
+                                    split='test',
+                                    keep_difficult=keep_difficult)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False,
+                                          collate_fn=test_dataset.collate_fn, num_workers=workers, pin_memory=True)
+
     # Calculate total number of epochs to train and the epochs to decay learning rate at (i.e. convert iterations to epochs)
     # To convert iterations to epochs, divide iterations by the number of iterations per epoch
     # The paper trains for 120,000 iterations with a batch size of 32, decays after 80,000 and 100,000 iterations
     epochs = iterations // (len(train_dataset) // 32)
     decay_lr_at = [it // (len(train_dataset) // 32) for it in decay_lr_at]
     print('decay_lr_at',decay_lr_at)
+    print('epochs:',epochs)
+
     # Epochs
     for epoch in range(start_epoch, epochs):
 
         # Decay learning rate at particular epochs
-        #from ipdb import set_trace
         if epoch in decay_lr_at:
             adjust_learning_rate(optimizer, decay_lr_to)
-
 
         # One epoch's training
         train(train_loader=train_loader,
@@ -94,11 +123,14 @@ def main():
               criterion=criterion,
               optimizer=optimizer,
               epoch=epoch)
-        print('lr:',lr)
+
         # Save checkpoint
         save_checkpoint(epoch, model, optimizer)
-        print("save epoh[{}] checkpoint!".format(epoch))
+        print("save epoh[{}] checkpoint_download!".format(epoch))
 
+        # eval model
+        if epoch % eval_freq == 0:    
+            evaluate(test_loader, model, epoch)
 
 def train(train_loader, model, criterion, optimizer, epoch):
     """
@@ -119,14 +151,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
     start = time.time()
 
     # Batches
-    # from ipdb import set_trace
-    # set_trace()
     for i, (images, boxes, labels, _) in enumerate(train_loader):
         data_time.update(time.time() - start)
-        set_trace()
-        # 展示训练的图片并画上真值框
+
+        # 可视化训练样本
         # show_train_pic(images,boxes,i)
-      
+        # set_trace()
+
+
         # Move to default device
         images = images.to(device)  # (batch_size (N), 3, 300, 300)
         boxes = [b.to(device) for b in boxes]
@@ -134,10 +166,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # Forward prop.
         predicted_locs, predicted_scores = model(images)  # (N, 8732, 4), (N, 8732, n_classes)
+
         # Loss
-        
         loss = criterion(predicted_locs, predicted_scores, boxes, labels, images)  # scalar
-        
+
         # Backward prop.
         optimizer.zero_grad()
         loss.backward()
@@ -151,8 +183,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         losses.update(loss.item(), images.size(0))
         batch_time.update(time.time() - start)
+
         start = time.time()
-    
+
         # Print status
         if i % print_freq == 0:
             print('Epoch: [{0}][{1}/{2}]\t'
@@ -162,7 +195,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                                                                   batch_time=batch_time,
                                                                   data_time=data_time, loss=losses))
             log.write('Epoch: [{0}][{1}/{2}]\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\n'.format(epoch, i, len(train_loader),loss=losses))
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\n'.format(epoch, i, len(train_loader),loss=losses))      
     log.close()                 
     del predicted_locs, predicted_scores, images, boxes, labels  # free some memory since their histories may be stored
 

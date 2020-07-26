@@ -2,35 +2,22 @@ from utils import *
 from datasets import PascalVOCDataset
 from tqdm import tqdm
 from pprint import PrettyPrinter
-
+from ipdb import set_trace
+import torchvision.transforms.functional as FT
 # Good formatting when printing the APs for each class and mAP
 pp = PrettyPrinter()
 
 # Parameters
 data_folder = './json/'
 keep_difficult = True  # difficult ground truth objects must always be considered in mAP calculation, because these objects DO exist!
-batch_size = 16
+batch_size = 1
 workers = 4
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 checkpoint = './checkpoint_ssd300.pth.tar'
 
-# Load model checkpoint that is to be evaluated
-checkpoint = torch.load(checkpoint)
-model = checkpoint['model']
-model = model.to(device)
-
-# Switch to eval mode
-model.eval()
-
-# Load test data
-test_dataset = PascalVOCDataset(data_folder,
-                                split='test',
-                                keep_difficult=keep_difficult)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
-                                          collate_fn=test_dataset.collate_fn, num_workers=workers, pin_memory=True)
 
 
-def evaluate(test_loader, model):
+def evaluate(test_loader, model, epoch):
     """
     Evaluate.
 
@@ -62,7 +49,8 @@ def evaluate(test_loader, model):
                                                                                        min_score=0.01, max_overlap=0.45,
                                                                                        top_k=200)
             # Evaluation MUST be at min_score=0.01, max_overlap=0.45, top_k=200 for fair comparision with the paper's results and other repos
-
+            # set_trace()
+            # img_show = FT.to_pil_image(images[0].cpu())
             # Store this batch's results for mAP calculation
             boxes = [b.to(device) for b in boxes]
             labels = [l.to(device) for l in labels]
@@ -76,17 +64,42 @@ def evaluate(test_loader, model):
             true_difficulties.extend(difficulties)
 
         # Calculate mAP
+        
         APs, mAP = calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties)
 
     # Print AP for each class
     pp.pprint(APs)
-    ap = open('./test_val_result/AP.txt', 'w')
     print('\nMean Average Precision (mAP): %.3f' % mAP)
-    for key,value in APs.items():
-        ap.write('{key}  :  {value}'.format(key = key, value = value))
-        ap.write('\n')
-    ap.write('Mean Average Precision (mAP):  {}'.format(mAP))
+    for k in APs.keys():
+        if APs[k] < 0.001:
+            APs[k] = 0
+    ap = open('AP.txt', 'a')
+    ap.write('epoch : [{}]'.format(str(epoch)))
+    # ap.write('nine : [{}]'.format(str(round(APs['nine'],5))))
+    # ap.write('ten : [{}]'.format(str(round(APs['ten'],5))))
+    # ap.write('jack : [{}]'.format(str(round(APs['jack'],5))))
+    # ap.write('queen : [{}]'.format(str(round(APs['queen'],5))))
+    # ap.write('king : [{}]'.format(str(round(APs['king'],5))))
+    # ap.write('ace : [{}]'.format(str(round(APs['ace'],5))))
+    ap.write('ws : [{}]'.format(str(round(APs['ws'],5))))
+    ap.write('mAP : [{}]\n'.format(str(round(mAP,5))))
     ap.close() 
 
+
 if __name__ == '__main__':
+    # Load model checkpoint that is to be evaluated
+    checkpoint = torch.load(checkpoint)
+    model = checkpoint['model']
+    model = model.to(device)
+
+    # Switch to eval mode
+    model.eval()
+
+    # Load test data
+    test_dataset = PascalVOCDataset(data_folder,
+                                    split='test',
+                                    keep_difficult=keep_difficult)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                                            collate_fn=test_dataset.collate_fn, num_workers=workers, pin_memory=True)
+
     evaluate(test_loader, model)

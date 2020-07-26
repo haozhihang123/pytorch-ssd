@@ -5,13 +5,10 @@ from math import sqrt
 from itertools import product as product
 import torchvision
 from ipdb import set_trace
+from collections import OrderedDict
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-import cv2
-import numpy as np
-import os
-from PIL import Image
-from PIL import ImageDraw
-from PIL import ImageFont
+
+
 class VGGBase(nn.Module):
     """
     VGG base convolutions to produce lower-level feature maps.
@@ -48,8 +45,6 @@ class VGGBase(nn.Module):
         self.conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)  # atrous convolution
 
         self.conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
-
-
 
         # Load pretrained layers
         self.load_pretrained_layers()
@@ -101,12 +96,15 @@ class VGGBase(nn.Module):
         Therefore, we convert fc6 and fc7 into convolutional layers, and subsample by decimation. See 'decimate' in utils.py.
         """
         # Current state of base
-
         state_dict = self.state_dict()
         param_names = list(state_dict.keys())
 
         # Pretrained VGG base
-        pretrained_state_dict = torchvision.models.vgg16(pretrained=True).state_dict()
+        # pretrained_state_dict = torchvision.models.vgg16(pretrained=True).state_dict()
+        # pretrained_param_names = list(pretrained_state_dict.keys())
+
+        vgg16_model_path = 'pretrained/vgg16-397923af.pth'
+        pretrained_state_dict = torch.load(vgg16_model_path)
         pretrained_param_names = list(pretrained_state_dict.keys())
 
         # Transfer conv. parameters from pretrained model to current model
@@ -162,7 +160,6 @@ class AuxiliaryConvolutions(nn.Module):
         """
         Initialize convolution parameters.
         """
-
         for c in self.children():
             if isinstance(c, nn.Conv2d):
                 nn.init.xavier_uniform_(c.weight)
@@ -263,6 +260,7 @@ class PredictionConvolutions(nn.Module):
         :return: 8732 locations and class scores (i.e. w.r.t each prior box) for each image
         """
         batch_size = conv4_3_feats.size(0)
+
         # Predict localization boxes' bounds (as offsets w.r.t prior-boxes)
         l_conv4_3 = self.loc_conv4_3(conv4_3_feats)  # (N, 16, 38, 38)
         l_conv4_3 = l_conv4_3.permute(0, 2, 3,
@@ -358,13 +356,13 @@ class SSD300(nn.Module):
         """
         # Run VGG base network convolutions (lower level feature map generators)
         conv4_3_feats, conv7_feats = self.base(image)  # (N, 512, 38, 38), (N, 1024, 19, 19)
-        
+
         # Rescale conv4_3 after L2 norm
         norm = conv4_3_feats.pow(2).sum(dim=1, keepdim=True).sqrt()  # (N, 1, 38, 38)
         conv4_3_feats = conv4_3_feats / norm  # (N, 512, 38, 38)
         conv4_3_feats = conv4_3_feats * self.rescale_factors  # (N, 512, 38, 38)
         # (PyTorch autobroadcasts singleton dimensions during arithmetic)
-        # set_trace()
+
         # Run auxiliary convolutions (higher level feature map generators)
         conv8_2_feats, conv9_2_feats, conv10_2_feats, conv11_2_feats = \
             self.aux_convs(conv7_feats)  # (N, 512, 10, 10),  (N, 256, 5, 5), (N, 256, 3, 3), (N, 256, 1, 1)
@@ -375,6 +373,7 @@ class SSD300(nn.Module):
         # 可视化特征图
         # show_feature_map(conv4_3_feats, conv7_feats,conv8_2_feats, conv9_2_feats, conv10_2_feats, conv11_2_feats)
 
+
         return locs, classes_scores
 
     def create_prior_boxes(self):
@@ -383,26 +382,29 @@ class SSD300(nn.Module):
 
         :return: prior boxes in center-size coordinates, a tensor of dimensions (8732, 4)
         """
-        fmap_dims = {'conv4_3': 38,
-                     'conv7': 19,
-                     'conv8_2': 10,
-                     'conv9_2': 5,
-                     'conv10_2': 3,
-                     'conv11_2': 1}
+        fmap_dims = OrderedDict ()
+        fmap_dims['conv4_3'] = 38
+        fmap_dims['conv7'] = 19
+        fmap_dims['conv8_2'] = 10
+        fmap_dims['conv9_2'] = 5
+        fmap_dims['conv10_2'] = 3
+        fmap_dims['conv11_2'] = 1
 
-        obj_scales = {'conv4_3': 0.1,
-                      'conv7': 0.2,
-                      'conv8_2': 0.375,
-                      'conv9_2': 0.55,
-                      'conv10_2': 0.725,
-                      'conv11_2': 0.9}
+        obj_scales =OrderedDict()
+        obj_scales['conv4_3'] = 0.1
+        obj_scales['conv7'] = 0.2
+        obj_scales['conv8_2'] = 0.375
+        obj_scales['conv9_2'] = 0.55
+        obj_scales['conv10_2'] = 0.725
+        obj_scales['conv11_2'] = 0.9
 
-        aspect_ratios = {'conv4_3': [1., 2., 0.5],
-                         'conv7': [1., 2., 3., 0.5, .333],
-                         'conv8_2': [1., 2., 3., 0.5, .333],
-                         'conv9_2': [1., 2., 3., 0.5, .333],
-                         'conv10_2': [1., 2., 0.5],
-                         'conv11_2': [1., 2., 0.5]}
+        aspect_ratios =OrderedDict()
+        aspect_ratios['conv4_3'] =[1., 2., 0.5]
+        aspect_ratios['conv7'] = [1., 2., 3., 0.5, .333]
+        aspect_ratios['conv8_2'] =[1., 2., 3., 0.5, .333]
+        aspect_ratios['conv9_2'] =[1., 2., 3., 0.5, .333]
+        aspect_ratios['conv10_2'] =[1., 2., 0.5]
+        aspect_ratios['conv11_2'] = [1., 2., 0.5]
 
         fmaps = list(fmap_dims.keys())
 
@@ -416,7 +418,6 @@ class SSD300(nn.Module):
 
                     for ratio in aspect_ratios[fmap]:
                         prior_boxes.append([cx, cy, obj_scales[fmap] * sqrt(ratio), obj_scales[fmap] / sqrt(ratio)])
-
                         # For an aspect ratio of 1, use an additional prior whose scale is the geometric mean of the
                         # scale of the current feature map and the scale of the next feature map
                         if ratio == 1.:
@@ -429,7 +430,8 @@ class SSD300(nn.Module):
 
         prior_boxes = torch.FloatTensor(prior_boxes).to(device)  # (8732, 4)
         prior_boxes.clamp_(0, 1)  # (8732, 4)
-
+        # print('****************prior_boxes*****************')
+        # print(prior_boxes)
         return prior_boxes
 
     def detect_objects(self, predicted_locs, predicted_scores, min_score, max_overlap, top_k):
@@ -490,7 +492,7 @@ class SSD300(nn.Module):
 
                 # A torch.uint8 (byte) tensor to keep track of which predicted boxes to suppress
                 # 1 implies suppress, 0 implies don't suppress
-                suppress = torch.zeros((n_above_min_score), dtype=torch.bool).to(device)  # (n_qualified)
+                suppress = torch.zeros((n_above_min_score), dtype=torch.uint8).to(device)  # (n_qualified)
 
                 # Consider each box in order of decreasing scores
                 for box in range(class_decoded_locs.size(0)):
@@ -500,19 +502,16 @@ class SSD300(nn.Module):
 
                     # Suppress boxes whose overlaps (with this box) are greater than maximum overlap
                     # Find such boxes and update suppress indices
-                    
                     suppress = torch.max(suppress, overlap[box] > max_overlap)
-                    
                     # The max operation retains previously suppressed boxes, like an 'OR' operation
 
                     # Don't suppress this box, even though it has an overlap of 1 with itself
                     suppress[box] = 0
 
                 # Store only unsuppressed boxes for this class
-                #image_boxes.append(class_decoded_locs[1 - suppress])
-                image_boxes.append(class_decoded_locs[~suppress])
-                image_labels.append(torch.LongTensor((~suppress).sum().item() * [c]).to(device))
-                image_scores.append(class_scores[~suppress])
+                image_boxes.append(class_decoded_locs[1 - suppress])
+                image_labels.append(torch.LongTensor((1 - suppress).sum().item() * [c]).to(device))
+                image_scores.append(class_scores[1 - suppress])
 
             # If no object in any class is found, store a placeholder for 'background'
             if len(image_boxes) == 0:
@@ -574,20 +573,23 @@ class MultiBoxLoss(nn.Module):
         batch_size = predicted_locs.size(0)
         n_priors = self.priors_cxcy.size(0)
         n_classes = predicted_scores.size(2)
+
         assert n_priors == predicted_locs.size(1) == predicted_scores.size(1)
+
         true_locs = torch.zeros((batch_size, n_priors, 4), dtype=torch.float).to(device)  # (N, 8732, 4)
         true_classes = torch.zeros((batch_size, n_priors), dtype=torch.long).to(device)  # (N, 8732)
-
         image = img.cpu()
         img_np = image.numpy()
-        save_dir = './loss_pic'
+        save_dir = './show_groundtruth_priorbox_predictbox'
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
         # For each image
         for i in range(batch_size):
             n_objects = boxes[i].size(0)
-            overlap = find_jaccard_overlap(boxes[i],self.priors_xy)  # (n_objects, 8732)
+
+            overlap = find_jaccard_overlap(boxes[i],
+                                           self.priors_xy)  # (n_objects, 8732)
 
             # For each prior, find the object that has the maximum overlap
             overlap_for_each_prior, object_for_each_prior = overlap.max(dim=0)  # (8732)
@@ -599,19 +601,18 @@ class MultiBoxLoss(nn.Module):
             # To remedy this -
             # First, find the prior that has the maximum overlap for each object.
             iou, prior_for_each_object = overlap.max(dim=1)  # (N_o)
-# 
+
             # 画出真值框，选出的初始框（与真值最匹配的那个），预测框
             # show_groundtruth_priorbox_predictbox(img_np,save_dir,i,boxes,iou,predicted_locs,self.priors_xy,self.priors_cxcy,prior_for_each_object,predicted_scores)
-            
+
+
             # Then, assign each object to the corresponding maximum-overlap-prior. (This fixes 1.)
-            # 把目标对应最大IOU的初始框位置的值设置为（0,1,2...）括号内数字的个数对应真值框的个数
-            # 目的是与label_for_each_prior一行的labels[i]对应，作为labels[i]的索引
             object_for_each_prior[prior_for_each_object] = torch.LongTensor(range(n_objects)).to(device)
+
             # To ensure these priors qualify, artificially give them an overlap of greater than 0.5. (This fixes 2.)
             overlap_for_each_prior[prior_for_each_object] = 1.
 
             # Labels for each prior
-            # 给每一个prior打标签，把object_for_each_prior中每一个变量当做索引，在 labels[i]中寻找对应的变量
             label_for_each_prior = labels[i][object_for_each_prior]  # (8732)
             # Set priors whose overlaps with objects are less than the threshold to be background (no object)
             label_for_each_prior[overlap_for_each_prior < self.threshold] = 0  # (8732)
@@ -626,8 +627,10 @@ class MultiBoxLoss(nn.Module):
         positive_priors = true_classes != 0  # (N, 8732)
 
         # LOCALIZATION LOSS
+
         # Localization loss is computed only over positive (non-background) priors
         loc_loss = self.smooth_l1(predicted_locs[positive_priors], true_locs[positive_priors])  # (), scalar
+
         # Note: indexing with a torch.uint8 (byte) tensor flattens the tensor when indexing is across multiple dimensions (N & 8732)
         # So, if predicted_locs has the shape (N, 8732, 4), predicted_locs[positive_priors] will have (total positives, 4)
 
