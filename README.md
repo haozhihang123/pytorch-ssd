@@ -33,6 +33,7 @@
      
 （６）原始测试图片的程序只能测试一张，增加测试多张图像，原始图像存放在test_data，检测结果存放在test_val_result，所用程序为detect.py。
 
+（７）增加初始框可视化（直接运行prior_boxes_show中的Vision_for_prior.py文件）
 问题：
 由于python版本不同，可能会出现一些问题。
 model.py中suppress = torch.max(suppress, overlap[box] > max_overlap)这句话可能会出现
